@@ -25,6 +25,7 @@
 <property name="lucene-core.jar" value="lucene-core-${lucene.version}.jar"/>
 <property name="lucene-backward-codecs.jar" value="lucene-backward-codecs-${lucene.version}.jar"/>
 <property name="lucene-analyzers-common.jar" value="lucene-analyzers-common-${lucene.version}.jar"/>
+<property name="lucene-analyzers-kuromoji.jar" value="lucene-analyzers-kuromoji-${lucene.version}.jar"/>
 <property name="lucene-misc.jar" value="lucene-misc-${lucene.version}.jar"/>
 <!-- suggest is needed just for elasticsearch indexes if we'd merge their postings fully, 
 but org.elasticsearch.search.suggest.completion.Completion090PostingsFormat cannot be added due to 
@@ -40,6 +41,7 @@ dependency on old lucene (4.x)  so below will be usefull once elasticsearch is o
 <property name="file.reference.lucene-core.jar" value="${libdir}/${lucene-core.jar}"/>
 <property name="file.reference.lucene-backward-codecs.jar" value="${libdir}/${lucene-backward-codecs.jar}"/>
 <property name="file.reference.lucene-analyzers-common.jar" value="${libdir}/${lucene-analyzers-common.jar}"/>
+<property name="file.reference.lucene-analyzers-kuromoji.jar" value="${libdir}/${lucene-analyzers-kuromoji.jar}"/>
 <property name="file.reference.lucene-misc.jar" value="${libdir}/${lucene-misc.jar}"/>
 <property name="file.reference.lucene-suggest.jar" value="${libdir}/${lucene-suggest.jar}"/>
 <property name="file.reference.lucene-queries.jar" value="${libdir}/${lucene-queries.jar}"/>
@@ -66,6 +68,9 @@ dependency on old lucene (4.x)  so below will be usefull once elasticsearch is o
         </available>         
         <available file="${lucene-analyzers-common.jar}" type="file" property="lucene-analyzers-common.jar.present">
             <filepath refid="plainlib.search.path"/>
+        </available>
+        <available file="${lucene-analyzers-kuromoji.jar}" type="file" property="lucene-analyzers-kuromoji.jar.present">
+            <filepath refid="plainlib.search.path"/>
         </available> 
         <available file="${lucene-misc.jar}" type="file" property="lucene-misc.jar.present">
             <filepath refid="plainlib.search.path"/>
@@ -91,6 +96,7 @@ dependency on old lucene (4.x)  so below will be usefull once elasticsearch is o
                 <isset property="lucene-core.jar.present"/>
                 <isset property="lucene-backward-codecs.jar.present"/>
                 <isset property="lucene-analyzers-common.jar.present"/>
+                <isset property="lucene-analyzers-kuromoji.jar.present"/>
                 <isset property="lucene-misc.jar.present"/>
                 <isset property="lucene-suggest.jar.present"/>                
                 <isset property="lucene-queries.jar.present"/>
@@ -141,6 +147,8 @@ dependency on old lucene (4.x)  so below will be usefull once elasticsearch is o
         dest="${file.reference.lucene-backward-codecs.jar}" verbose="true" usetimestamp="true"/>        
         <get src="${mvn.repository}/org/apache/lucene/lucene-analyzers-common/${lucene.version}/${lucene-analyzers-common.jar}"
         dest="${file.reference.lucene-analyzers-common.jar}" verbose="true" usetimestamp="true"/>
+        <get src="${mvn.repository}/org/apache/lucene/lucene-analyzers-kuromoji/${lucene.version}/${lucene-analyzers-kuromoji.jar}"
+        dest="${file.reference.lucene-analyzers-kuromoji.jar}" verbose="true" usetimestamp="true"/>
         <get src="${mvn.repository}/org/apache/lucene/lucene-misc/${lucene.version}/${lucene-misc.jar}"
         dest="${file.reference.lucene-misc.jar}" verbose="true" usetimestamp="true"/>
         <get src="${mvn.repository}/org/apache/lucene/lucene-suggest/${lucene.version}/${lucene-suggest.jar}"

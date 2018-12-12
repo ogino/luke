@@ -69,12 +69,13 @@ import org.apache.lucene.search.spans.SpanTermQuery;
 import org.apache.lucene.store.*;
 import org.apache.lucene.util.AttributeSource;
 import org.apache.lucene.util.BytesRef;
-import org.apache.lucene.util.LegacyNumericUtils;
+// import org.apache.lucene.util.LegacyNumericUtils; //Please use PointValues instead.
 import org.apache.lucene.util.Version;
 import org.apache.lucene.util.automaton.Automaton;
 import org.apache.lucene.util.automaton.Transition;
 import org.apache.lucene.queryparser.xml.CoreParser;
 import org.apache.lucene.queryparser.xml.CorePlusExtensionsParser;
+import org.apache.lucene.search.similarities.BM25Similarity;
 import org.apache.lucene.util.Bits;
 import org.getopt.luke.DocReconstructor.Reconstructed;
 import org.getopt.luke.decoders.BinaryDecoder;
@@ -825,7 +826,7 @@ public class Luke extends Thinlet implements ClipboardOwner {
     }
     try {
       IndexWriter iw = createIndexWriter();      
-      iw.setCommitData(userData);
+      iw.setLiveCommitData(userData.entrySet());
       iw.commit();
       iw.close();
       refreshAfterWrite();
@@ -1391,7 +1392,7 @@ public class Luke extends Thinlet implements ClipboardOwner {
     Object segGen = find("segGen");
     setString(segGen, "text", commit.getSegmentsFileName() + " (gen " + commit.getGeneration() + ")");
     String segName = commit.getSegmentsFileName();
-    SegmentInfos infos = new SegmentInfos();
+    SegmentInfos infos;
     try {
       infos=SegmentInfos.readCommit(dir, segName);
     } catch (Exception e) {
@@ -1538,7 +1539,10 @@ public class Luke extends Thinlet implements ClipboardOwner {
     }
     // fieldInfos
     try {
-      SegmentReader sr = new SegmentReader(si, IOContext.READ);
+      IndexGate.FormatDetails formatDetails = IndexGate.getIndexFormat(dir);
+//      SegmentReader sr = new SegmentReader(si, formatDetails.indexCreatedVersionMajor, IOContext.READ);
+      DirectoryReader ir = StandardDirectoryReader.open(si.info.dir);
+      SegmentReader sr = (SegmentReader) ir.leaves().get(0).reader();
       FieldInfos fis = sr.getFieldInfos();
       map = new LinkedHashMap<String,String>();
       List<String> flds = new ArrayList<String>(fis.size());
@@ -1579,7 +1583,7 @@ public class Luke extends Thinlet implements ClipboardOwner {
         }
         add(r, cell);
       }
-    } catch (IOException e1) {
+    } catch (Exception e1) {
       e1.printStackTrace();
     }
   }
@@ -1988,15 +1992,15 @@ public class Luke extends Thinlet implements ClipboardOwner {
             setBoolean(fixPanel, "visible", true);
             repaint(dialog);
             statMsg = "BAD: ";
-            if (status.cantOpenSegments) {
-              statMsg += "cantOpenSegments ";
-            }
+//            if (status.cantOpenSegments) {
+//              statMsg += "cantOpenSegments ";
+//            }
             if (status.missingSegments) {
               statMsg += "missingSegments ";
             }
-            if (status.missingSegmentVersion) {
-              statMsg += "missingSegVersion ";
-            }
+//            if (status.missingSegmentVersion) {
+//              statMsg += "missingSegVersion ";
+//            }
             if (status.numBadSegments > 0) {
               statMsg += "numBadSegments=" + status.numBadSegments + " ";
             }
@@ -2570,7 +2574,7 @@ public class Luke extends Thinlet implements ClipboardOwner {
               Object fType = find(editfield, "fType");
               Object sText = find(editfield, "sText");
               Object rText = find(editfield, "rText");
-              Object fBoost = find(editfield, "fBoost");
+//              Object fBoost = find(editfield, "fBoost");
               Object cbStored = find(editfield, "cbStored");
               //Object cbCmp = find(editfield, "cbCmp");
               Object cbBin = find(editfield, "cbBin");
@@ -2603,7 +2607,7 @@ public class Luke extends Thinlet implements ClipboardOwner {
                   text = f.stringValue();
                 }
                 setString(sText, "text", text);
-                setString(fBoost, "text", String.valueOf(f.boost()));
+                //setString(fBoost, "text", String.valueOf(f.boost()));
                 IndexableFieldType t = f.fieldType();
                 setBoolean(cbStored, "selected", t.stored());
                 // Lucene 3.0 doesn't support compressed fields
@@ -2630,7 +2634,7 @@ public class Luke extends Thinlet implements ClipboardOwner {
                   sep = ", ";
                 }
                 setBoolean(cbIndexed, "selected", true);
-                setString(fBoost, "text", String.valueOf(1.0f));
+//                setString(fBoost, "text", String.valueOf(1.0f));
                 setString(rText, "text", recField.toString(sep));
               } else {
                 remove(restored);
@@ -2731,7 +2735,7 @@ public class Luke extends Thinlet implements ClipboardOwner {
         } catch (Exception e) {
           e.printStackTrace();
         }
-        f.setBoost(boost);
+        //f.setBoost(boost); //Index-time boosts are deprecated, please index index-time scoring factors into a doc value field and combine them with the score at query time using eg. FunctionScoreQuery.
       }
       doc.add(f);
     }
@@ -2929,7 +2933,7 @@ public class Luke extends Thinlet implements ClipboardOwner {
       try {
         if (info != null && info.hasNorms()) {
           NumericDocValues norms = MultiDocValues.getNormValues(ir, fName);
-          String val = Util.normsToString(norms, fName, docid, sim);
+          String val = "";//Util.normsToString(norms, fName, docid, sim);
           setString(cell, "text", val);
         } else {
           setString(cell, "text", "---");
@@ -3084,104 +3088,111 @@ public class Luke extends Thinlet implements ClipboardOwner {
     StringSelection sel = new StringSelection(sb.toString());
     Toolkit.getDefaultToolkit().getSystemClipboard().setContents(sel, this);
   }
-  
-  public void actionExamineNorm(Object table) throws Exception {
-    Object row = getSelectedItem(table);
-    if (row == null) return;
-    if (ir == null) {
-      showStatus(MSG_NOINDEX);
-      return;
-    }
-    Field f = (Field) getProperty(row, "field");
-    if (f == null) {
-      showStatus("No data available for this field");
-      return;
-    }
-    FieldInfo info = infos.fieldInfo(f.name());
-    if (info.getIndexOptions() == IndexOptions.NONE || info.getIndexOptions() == null) {        
-      showStatus("Cannot examine norm value - this field is not indexed.");
-      return;
-    }
-    if (!info.hasNorms()) {
-      showStatus("Cannot examine norm value - this field has no norms.");
-      return;
-    }
-    Object dialog = addComponent(null, "/xml/fnorm.xml", null, null);
-    Integer docNum = (Integer)getProperty(table, "docNum");
-    putProperty(dialog, "docNum", getProperty(table, "docNum"));
-    putProperty(dialog, "field", f);
-    Object curNorm = find(dialog, "curNorm");
-    Object newNorm = find(dialog, "newNorm");
-    Object encNorm = find(dialog, "encNorm");
-    Object doc = find(dialog, "docNum");
-    Object fld = find(dialog, "fld");
-    Object srchOpts = find("srchOptTabs");
-    Similarity sim = createSimilarity(srchOpts);
-    TFIDFSimilarity s = null;
-    if (sim != null && (sim instanceof TFIDFSimilarity)) {
-      s = (TFIDFSimilarity)sim;
-    } else {
-      s = defaultSimilarity;
-    }
-    setString(doc, "text", String.valueOf(docNum.intValue()));
-    setString(fld, "text", f.name());
-    putProperty(dialog, "similarity", s);
-    if (ir != null) {
-     try {         
-       NumericDocValues nnorms = MultiDocValues.getNormValues(ir, f.name());       
-       byte curBVal=0;
-       if (nnorms!=null) {curBVal=(byte)nnorms.get(docNum.intValue());}       
-       float curFVal = Util.decodeNormValue(curBVal, f.name(), s);
-       setString(curNorm, "text", String.valueOf(curFVal));
-       setString(newNorm, "text", String.valueOf(curFVal));
-       setString(encNorm, "text", String.valueOf(curFVal) +
-          " (0x" + Util.byteToHex(curBVal) + ")");
-     } catch (Exception e) {
-       e.printStackTrace();
-       errorMsg("Error reading norm: " + e.toString());
-       return;
-     }
-    }
-    add(dialog);
-    displayNewNorm(dialog);
-  }
-  
-  public void displayNewNorm(Object dialog) {
-    Object newNorm = find(dialog, "newNorm");
-    Object encNorm = find(dialog, "encNorm");
-    Field f = (Field)getProperty(dialog, "field");
-    TFIDFSimilarity s = (TFIDFSimilarity)getProperty(dialog, "similarity");
-    Object sim = find(dialog, "sim");
-    String simClassString = getString(sim, "text");
-    if (simClassString != null && simClassString.trim().length() > 0
-            && !simClassString.equals(defaultSimilarity.getClass().getName())) {
-      try {
-        Class cls = Class.forName(simClassString.trim());
-        if (TFIDFSimilarity.class.isAssignableFrom(cls)) {
-          s = (TFIDFSimilarity)cls.newInstance();
-          putProperty(dialog, "similarity", s);
-        }
-      } catch (Throwable t) {
-        t.printStackTrace();
-        showStatus("Invalid similarity class " + simClassString + ", using DefaultSimilarity.");
-      }
-    }
-    if (s == null) {
-      s = defaultSimilarity;
-    }
-    setString(sim, "text", s.getClass().getName());
-    try {
-      float newFVal = Float.parseFloat(getString(newNorm, "text"));
-      long newLVal = Util.encodeNormValue(newFVal, f.name(), s);
-      float encFVal = Util.decodeNormValue(newLVal, f.name(), s);
-      setString(encNorm, "text", String.valueOf(encFVal) +
-          " (0x" + Util.longToHex(newLVal) + ")");
-      putProperty(dialog, "newNorm", new Float(newFVal));
-      doLayout(dialog);
-    } catch (Exception e) {
-      // XXX eat silently
-    }
-  }
+//  
+//  public void actionExamineNorm(Object table) throws Exception {
+//    Object row = getSelectedItem(table);
+//    if (row == null) return;
+//    if (ir == null) {
+//      showStatus(MSG_NOINDEX);
+//      return;
+//    }
+//    Field f = (Field) getProperty(row, "field");
+//    if (f == null) {
+//      showStatus("No data available for this field");
+//      return;
+//    }
+//    FieldInfo info = infos.fieldInfo(f.name());
+//    if (info.getIndexOptions() == IndexOptions.NONE || info.getIndexOptions() == null) {        
+//      showStatus("Cannot examine norm value - this field is not indexed.");
+//      return;
+//    }
+//    if (!info.hasNorms()) {
+//      showStatus("Cannot examine norm value - this field has no norms.");
+//      return;
+//    }
+//    Object dialog = addComponent(null, "/xml/fnorm.xml", null, null);
+//    Integer docNum = (Integer)getProperty(table, "docNum");
+//    putProperty(dialog, "docNum", getProperty(table, "docNum"));
+//    putProperty(dialog, "field", f);
+//    Object curNorm = find(dialog, "curNorm");
+//    Object newNorm = find(dialog, "newNorm");
+//    Object encNorm = find(dialog, "encNorm");
+//    Object doc = find(dialog, "docNum");
+//    Object fld = find(dialog, "fld");
+//    Object srchOpts = find("srchOptTabs");
+////    Similarity sim = createSimilarity(srchOpts);
+////    TFIDFSimilarity s = null;
+////    if (sim != null && (sim instanceof TFIDFSimilarity)) {
+////      s = (TFIDFSimilarity)sim;
+////    } else {
+////      s = defaultSimilarity;
+////    }
+//    setString(doc, "text", String.valueOf(docNum.intValue()));
+//    setString(fld, "text", f.name());
+////    putProperty(dialog, "similarity", s);
+//    if (ir != null) {
+//     try {         
+//       NumericDocValues nnorms = MultiDocValues.getNormValues(ir, f.name());       
+//       byte curBVal=0;
+////       if (nnorms!=null) {curBVal=(byte)nnorms.get(docNum.intValue());}  
+//                 float curFVal = 0;
+//       if (nnorms.advanceExact(docNum)) {
+//                         String val = Long.toString(nnorms.longValue());
+//                         curFVal=curBVal;
+//                     } else {
+//                         //setString(cell, "text", "---");
+//                     }       
+////       float curFVal = Util.decodeNormValue(curBVal, f.name(), s);
+//       setString(curNorm, "text", String.valueOf(curFVal));
+//       setString(newNorm, "text", String.valueOf(curFVal));
+//       setString(encNorm, "text", String.valueOf(curFVal) +
+//          " (0x" + Util.byteToHex(curBVal) + ")");
+//     } catch (Exception e) {
+//       e.printStackTrace();
+//       errorMsg("Error reading norm: " + e.toString());
+//       return;
+//     }
+//    }
+//    add(dialog);
+//    displayNewNorm(dialog);
+//  }
+//  
+//  public void displayNewNorm(Object dialog) {
+//    Object newNorm = find(dialog, "newNorm");
+//    Object encNorm = find(dialog, "encNorm");
+//    Field f = (Field)getProperty(dialog, "field");
+//    TFIDFSimilarity s = (TFIDFSimilarity)getProperty(dialog, "similarity");
+//    Object sim = find(dialog, "sim");
+//    String simClassString = getString(sim, "text");
+//    if (simClassString != null && simClassString.trim().length() > 0
+//            && !simClassString.equals(defaultSimilarity.getClass().getName())) {
+//      try {
+//        Class cls = Class.forName(simClassString.trim());
+//        if (TFIDFSimilarity.class.isAssignableFrom(cls)) {
+//          s = (TFIDFSimilarity)cls.newInstance();
+//          putProperty(dialog, "similarity", s);
+//        }
+//      } catch (Throwable t) {
+//        t.printStackTrace();
+//        showStatus("Invalid similarity class " + simClassString + ", using DefaultSimilarity.");
+//      }
+//    }
+//    if (s == null) {
+//      s = defaultSimilarity;
+//    }
+//    setString(sim, "text", s.getClass().getName());
+//    try {
+//      float newFVal = Float.parseFloat(getString(newNorm, "text"));
+//      long newLVal = Util.encodeNormValue(newFVal, f.name(), s);
+//      float encFVal = Util.decodeNormValue(newLVal, f.name(), s);
+//      setString(encNorm, "text", String.valueOf(encFVal) +
+//          " (0x" + Util.longToHex(newLVal) + ")");
+//      putProperty(dialog, "newNorm", new Float(newFVal));
+//      doLayout(dialog);
+//    } catch (Exception e) {
+//      // XXX eat silently
+//    }
+//  }
   
   public void showTField(Object table) {
     Object row = getSelectedItem(table);
@@ -3253,7 +3264,7 @@ public class Luke extends Thinlet implements ClipboardOwner {
       }
     } else if (enc.equals("cbLong")) {
       try {
-        long num = LegacyNumericUtils.prefixCodedToLong(new BytesRef(f.stringValue()));
+        long num = 0;//TODO LegacyNumericUtils.prefixCodedToLong(new BytesRef(f.stringValue()));
         value = String.valueOf(num);
         len = 1;
       } catch (Exception e) {
@@ -4025,7 +4036,7 @@ public class Luke extends Thinlet implements ClipboardOwner {
     }
     qp.setAllowLeadingWildcard(getBoolean(ckWild, "selected"));
     qp.setEnablePositionIncrements(getBoolean(ckPosIncr, "selected"));
-    qp.setLowercaseExpandedTerms(getBoolean(ckLoExp, "selected"));
+//    qp.setLowercaseExpandedTerms(getBoolean(ckLoExp, "selected")); // TODO
     qp.setDateResolution(resolution);
     qp.setDefaultOperator(op);
     if (getBoolean(ckXmlParser, "selected")) {
@@ -4175,9 +4186,9 @@ public class Luke extends Thinlet implements ClipboardOwner {
       Object n1 = create("node");
       String descr = "clauses=" + bq.clauses().size() +
       ", maxClauses=" + max;
-      if (bq.isCoordDisabled()) {
-        descr += ", coord=false";
-      }
+//      if (bq.isCoordDisabled()) {
+//        descr += ", coord=false";
+//      }
       if (bq.getMinimumNumberShouldMatch() > 0) {
         descr += ", minShouldMatch=" + bq.getMinimumNumberShouldMatch();
       }
@@ -4308,7 +4319,7 @@ public class Luke extends Thinlet implements ClipboardOwner {
       MultiTermQuery mq = (MultiTermQuery)q;
       Set<Term> terms = new HashSet<Term>();
       try {
-       EMPTY_INDEXSEARCHER.createNormalizedWeight(mq, false).extractTerms(terms);
+       EMPTY_INDEXSEARCHER.createWeight(mq, false, 1).extractTerms(terms);
       } catch (IOException e) {
           e.printStackTrace();
         // empty terms in case of error
@@ -4372,7 +4383,7 @@ public class Luke extends Thinlet implements ClipboardOwner {
         setString(n, "text", "class=" + q.getClass().getName() + ", " + getString(n, "text") + ", toString=" + q.toString(defField));
         HashSet<Term> terms = new HashSet<Term>();
         try {
-         EMPTY_INDEXSEARCHER.createNormalizedWeight(sq, false).extractTerms(terms);
+         EMPTY_INDEXSEARCHER.createWeight(sq, false, 1).extractTerms(terms);
         } catch (IOException e) {
           e.printStackTrace();
         // empty terms in case of error
@@ -4430,7 +4441,7 @@ public class Luke extends Thinlet implements ClipboardOwner {
       String defField = getDefaultField(find("srchOptTabs"));
       Set<Term> terms = new HashSet<Term>();
       try {
-       EMPTY_INDEXSEARCHER.createNormalizedWeight(q, false).extractTerms(terms);
+       EMPTY_INDEXSEARCHER.createWeight(q, false, 1).extractTerms(terms);
       } catch (IOException e) {
           e.printStackTrace();
         // empty terms in case of error
@@ -5112,7 +5123,8 @@ public class Luke extends Thinlet implements ClipboardOwner {
     return similarity;
   }
   
-  private static TFIDFSimilarity defaultSimilarity = new ClassicSimilarity();
+//  private static TFIDFSimilarity defaultSimilarity = new ClassicSimilarity();
+  private static BM25Similarity defaultSimilarity = new BM25Similarity();
   
   /**
    * Set the current custom similarity implementation.
